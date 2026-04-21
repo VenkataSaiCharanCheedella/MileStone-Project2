@@ -2,80 +2,99 @@ import React, { createContext, useState, useEffect } from 'react';
 
 export const EventContext = createContext();
 
-const INITIAL_EVENTS = [
-  {
-    id: "1",
-    name: "Annual Tech Symposium 2026",
-    department: "Computer Science",
-    date: "October 24, 2026",
-    time: "10:00 AM - 4:00 PM",
-    venue: "Main Auditorium",
-    price: 250.00,
-    availableTickets: 100,
-    totalTickets: 100
-  },
-  {
-    id: "2",
-    name: "Business Ethics Workshop",
-    department: "Management",
-    date: "November 12, 2026",
-    time: "2:00 PM - 5:00 PM",
-    venue: "Seminar Hall B",
-    price: 150.00,
-    availableTickets: 50,
-    totalTickets: 50
-  },
-  {
-    id: "3",
-    name: "Robotics Hackathon",
-    department: "Electronics",
-    date: "December 5, 2026",
-    time: "9:00 AM - 9:00 PM",
-    venue: "Innovation Lab",
-    price: 500.00,
-    availableTickets: 20,
-    totalTickets: 20
-  }
-];
-
 export const EventProvider = ({ children }) => {
-  const [events, setEvents] = useState(() => {
-    const saved = localStorage.getItem('events');
-    return saved ? JSON.parse(saved) : INITIAL_EVENTS;
-  });
-
-  const [registrations, setRegistrations] = useState(() => {
-    const saved = localStorage.getItem('registrations');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [events, setEvents] = useState([]);
+  const [registrations, setRegistrations] = useState([]);
 
   useEffect(() => {
-    localStorage.setItem('events', JSON.stringify(events));
-  }, [events]);
+    fetchEvents();
+    fetchRegistrations();
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem('registrations', JSON.stringify(registrations));
-  }, [registrations]);
-
-  const bookTicket = (eventId, bookingDetails) => {
-    setEvents(prevEvents => prevEvents.map(event => 
-      event.id === eventId 
-        ? { ...event, availableTickets: event.availableTickets - bookingDetails.tickets }
-        : event
-    ));
-    
-    setRegistrations(prev => [...prev, { ...bookingDetails, eventId, date: new Date().toISOString() }]);
+  const fetchEvents = async () => {
+    try {
+      const res = await fetch('http://localhost:8080/api/events');
+      if (res.ok) {
+        const data = await res.json();
+        setEvents(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch events from backend", err);
+    }
   };
 
-  const addEvent = (newEvent) => {
-    const event = {
-      ...newEvent,
-      id: Date.now().toString(),
-      price: parseFloat(newEvent.price),
-      availableTickets: parseInt(newEvent.totalTickets),
-      totalTickets: parseInt(newEvent.totalTickets)
-    };
-    setEvents(prev => [...prev, event]);
+  const fetchRegistrations = async () => {
+    try {
+      const res = await fetch('http://localhost:8080/api/registrations');
+      if (res.ok) {
+        const data = await res.json();
+        setRegistrations(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch registrations from backend", err);
+    }
+  };
+
+  const bookTicket = async (eventId, bookingDetails) => {
+    try {
+      // The backend expects numeric eventId
+      const numericEventId = Number(eventId);
+      const payload = { ...bookingDetails, eventId: numericEventId };
+
+      const response = await fetch('http://localhost:8080/api/registrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        const newReg = await response.json();
+        setRegistrations(prev => [...prev, newReg]);
+        
+        // Optimistically update the event tickets locally
+        setEvents(prevEvents => prevEvents.map(event => 
+          event.id === numericEventId || event.id === String(eventId)
+            ? { ...event, availableTickets: event.availableTickets - bookingDetails.tickets }
+            : event
+        ));
+        return true;
+      } else {
+        console.error("Booking failed on backend");
+        return false;
+      }
+    } catch (error) {
+      console.error("Network error during booking", error);
+      return false;
+    }
+  };
+
+  const addEvent = async (newEvent) => {
+    try {
+      const eventToSave = {
+        ...newEvent,
+        price: parseFloat(newEvent.price),
+        availableTickets: parseInt(newEvent.totalTickets),
+        totalTickets: parseInt(newEvent.totalTickets)
+      };
+
+      const response = await fetch('http://localhost:8080/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(eventToSave)
+      });
+
+      if (response.ok) {
+        const savedEvent = await response.json();
+        setEvents(prev => [...prev, savedEvent]);
+        return true;
+      } else {
+        console.error("Adding event failed on backend");
+        return false;
+      }
+    } catch (error) {
+      console.error("Network error adding event", error);
+      return false;
+    }
   };
 
   return (
